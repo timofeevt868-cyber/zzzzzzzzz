@@ -9,6 +9,7 @@ from datetime import date, timedelta
 
 import aiohttp
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.exceptions import TelegramUnauthorizedError
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -17,25 +18,44 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
                            InlineKeyboardMarkup, LabeledPrice, Message,
                            PreCheckoutQuery)
 
-# ===================== НАСТРОЙКИ =====================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "9024105466:AAEtSFwOecOBgbK_nJEKBFUqXvHNJISu_cg")
-# ID админов через запятую, например: ADMIN_IDS="123456789,987654321"
-ADMIN_IDS = 8769232009 {int(x) for x in os.getenv("ADMIN_IDS", "0").split(",") if x.strip()}
+# =====================================================================
+#                      ✏️  ВСТАВЬ СВОИ ДАННЫЕ СЮДА
+# =====================================================================
 
+# 1) ТОКЕН БОТА — получи у @BotFather командой /newbot.
+#    Вставь между кавычками, например: "7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxx"
+BOT_TOKEN = "9024105466:AAEtSFwOecOBgbK_nJEKBFUqXvHNJISu_cg"
+
+# 2) ТВОЙ ID АДМИНА — узнай у бота @userinfobot (это число).
+#    Вставь число без кавычек, например: [123456789]
+#    Несколько админов: [123456789, 987654321]
+#    ВАЖНО: сначала зайди в своего бота и нажми /start, иначе он не сможет тебе писать.
+ADMIN_IDS = [123456789,987654321]
+
+# 3) (необязательно) Кошелёк TON для пополнений. Оставь "" если TON не нужен.
+TON_WALLET = ""
+
+# 4) Твой @username в Telegram, куда пользователи будут отправлять NFT-подарки
+#    (стандартная функция Telegram "Подарить подарок" → выбрать твой профиль).
+#    Без @, например: "my_admin_nick"
+ADMIN_GIFT_USERNAME = ""
+
+# =====================================================================
+#                 Дальше менять не обязательно (настройки)
+# =====================================================================
 TASK_REWARD = 2          # голды за одно задание
 MIN_WITHDRAW = 100       # минимум для вывода
 MARKET_FEE = 20          # комиссия маркета, %
 SKIN_NAME = "UMP Arid"   # скин, который выставляет пользователь
-DB_PATH = "bot.db"
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bot.db")
 
 # --- Пополнение звёздами ---
 STARS_PER_GOLD = 1.0                 # сколько звёзд стоит 1 голда (поменяй под себя)
 STAR_PACKS = [50, 100, 250, 500]     # пакеты голды
 
 # --- Пополнение TON ---
-TON_WALLET = os.getenv("TON_WALLET", "")                 # адрес твоего кошелька
-GOLD_PER_TON = float(os.getenv("GOLD_PER_TON", "100"))   # сколько голды за 1 TON
-TONCENTER_API_KEY = os.getenv("TONCENTER_API_KEY", "")   # необязательно, но с ключом меньше лимитов
+GOLD_PER_TON = 100.0     # сколько голды за 1 TON
+TONCENTER_API_KEY = ""   # необязательно (ключ от @tonapibot), с ключом меньше лимитов
 
 # --- Орёл или решка ---
 COIN_WIN_CHANCE = 0.47   # шанс выигрыша (показывается пользователю)
@@ -43,6 +63,25 @@ COIN_MIN_BET = 5
 COIN_MAX_BET = 500
 
 # --- Кейсы: цена и призы (голда, вес). Шансы показываются пользователю ---
+# --- Пополнение NFT-подарками: ОРИЕНТИР для админа, не автоматическая оценка ---
+# Это не точные цены, а грубая вилка по категориям — реальные floor-цены меняются
+# каждый день и зависят от модели/фона/редкости. Перед начислением сверяйся с
+# актуальным floor на Portals или Fragment. Супердорогие/редкие коллекции сюда
+# не включены намеренно — их оценивай отдельно, без ориентира по таблице.
+GIFT_PRICE_GUIDE = (
+    "🎁 <b>Ориентир по подаркам</b> (НЕ точная цена, финальную сумму назначает админ "
+    "после проверки реального floor на Portals/Fragment):\n\n"
+    "• Обычный неулучшенный подарок (Stars-гифт без NFT) — как правило символическая "
+    "ценность, часто не принимается или оценивается в 1–5 голды\n"
+    "• Рядовая NFT-коллекция (нижний флор, частые модели) — ориентировочно 5–30 голды\n"
+    "• Средняя NFT-коллекция (популярная, но не топовая) — ориентировочно 30–150 голды\n"
+    "• Редкая модель/фон внутри обычной коллекции — ориентировочно 150–500 голды\n"
+    "• Топовые/лимитированные дропы (напр. Plush Pepes и подобные) — оцениваются "
+    "ИНДИВИДУАЛЬНО админом, таблица здесь не применяется\n\n"
+    "Отправь подарок на профиль администратора в Telegram, затем пришли сюда скриншот "
+    "подтверждения — админ проверит и начислит голду вручную."
+)
+
 CASES = {
     "bronze": {"name": "🥉 Бронзовый", "price": 5,
                "prizes": [(0, 25), (2, 30), (5, 22), (8, 13), (15, 8), (30, 2)]},
@@ -52,6 +91,8 @@ CASES = {
              "prizes": [(0, 25), (40, 30), (100, 22), (160, 13), (300, 8), (600, 2)]},
 }
 # ======================================================
+
+ADMIN_IDS = set(ADMIN_IDS)
 
 logging.basicConfig(level=logging.INFO)
 router = Router()
@@ -83,6 +124,10 @@ def init_db():
             charge_id TEXT PRIMARY KEY, user_id INTEGER, gold INTEGER, stars INTEGER);
         CREATE TABLE IF NOT EXISTS ton_deposits(
             tx_hash TEXT PRIMARY KEY, user_id INTEGER, ton REAL, gold INTEGER);
+        CREATE TABLE IF NOT EXISTS nft_topups(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+            gift_name TEXT, amount INTEGER, proof_file_id TEXT,
+            status TEXT DEFAULT 'pending');
         """)
 
 
@@ -177,6 +222,15 @@ class Coin(StatesGroup):
     side = State()
 
 
+class NftTopup(StatesGroup):
+    name = State()
+    proof = State()
+
+
+class NftCredit(StatesGroup):
+    amount = State()  # админ вводит сумму, которую назначит за подарок (заявка ещё в state-данных)
+
+
 # ---------------------- ПОЛЬЗОВАТЕЛЬ ----------------------
 @router.message(CommandStart())
 async def start(m: Message):
@@ -253,6 +307,7 @@ async def topup(cb: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⭐ Telegram Stars", callback_data="topup_stars")],
         [InlineKeyboardButton(text="💎 TON", callback_data="topup_ton")],
+        [InlineKeyboardButton(text="🎁 NFT-подарком", callback_data="topup_nft")],
     ])
     await cb.message.answer("Выбери способ пополнения:", reply_markup=kb)
     await cb.answer()
@@ -320,6 +375,214 @@ async def topup_ton(cb: CallbackQuery):
         "Голда зачислится автоматически в течение пары минут. "
         "Без комментария платёж не определится — тогда напиши админу.",
         parse_mode="HTML")
+    await cb.answer()
+
+
+"""
+Механика пополнения NFT-подарком (все шаги подтверждаются админом вручную):
+
+1. Пользователь описывает, какой подарок хочет продать (status: pending).
+2. Админ смотрит заявку и НАЗЫВАЕТ СУММУ, которую начислит за этот подарок
+   (status: quoted). Деньги ещё не начислены — это предложение цены.
+3. Пользователь видит предложенную сумму, соглашается и ОТПРАВЛЯЕТ подарок
+   на профиль админа в Telegram, затем жмёт кнопку и присылает скриншот
+   подтверждения (status: proof_submitted).
+4. Админ проверяет, что подарок реально пришёл, и подтверждает — только
+   тогда голда зачисляется пользователю, ровно в ранее названной сумме
+   (status: credited). Либо отклоняет на любом шаге (status: rejected).
+"""
+
+
+@router.callback_query(F.data == "topup_nft")
+async def topup_nft(cb: CallbackQuery, state: FSMContext):
+    if not ADMIN_GIFT_USERNAME:
+        await cb.message.answer("Пополнение подарками пока не настроено.")
+        return await cb.answer()
+    await state.set_state(NftTopup.name)
+    await cb.message.answer(
+        GIFT_PRICE_GUIDE + "\n\nНапиши название подарка и коллекцию "
+        "(например: «Durov's Cap, модель X»). Администратор посмотрит и "
+        "назовёт тебе сумму, которую начислит за него — подарок пока "
+        "отправлять не нужно.",
+        parse_mode="HTML")
+    await cb.answer()
+
+
+@router.message(NftTopup.name)
+async def nft_name(m: Message, state: FSMContext, bot: Bot):
+    if not (m.text and m.text.strip()):
+        return await m.answer("Напиши название подарка текстом.")
+    await state.clear()
+    gift_name = m.text.strip()
+    with db() as c:
+        cur = c.execute(
+            "INSERT INTO nft_topups(user_id, gift_name) VALUES(?,?)",
+            (m.from_user.id, gift_name))
+        nid = cur.lastrowid
+    await m.answer("✅ Заявка отправлена администратору. Жди, он назовёт сумму "
+                   "за этот подарок — после этого нужно будет его отправить.",
+                   reply_markup=main_menu())
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="💰 Назвать сумму", callback_data=f"nft_price:{nid}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"nft_rej:{nid}"),
+    ]])
+    for admin in ADMIN_IDS:
+        if admin == 0:
+            continue
+        try:
+            await bot.send_message(
+                admin,
+                f"🎁 Заявка на пополнение подарком #{nid}\n"
+                f"Пользователь: {m.from_user.id} (@{m.from_user.username})\n"
+                f"Подарок: {gift_name}\n\n"
+                "Подарок ещё НЕ отправлен — сначала назначь сумму.",
+                reply_markup=kb)
+        except Exception:
+            logging.exception("Не удалось отправить заявку на подарок админу %s", admin)
+
+
+@router.callback_query(F.data.startswith("nft_price:"))
+async def nft_price_start(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    nid = int(cb.data.split(":")[1])
+    with db() as c:
+        req = c.execute("SELECT * FROM nft_topups WHERE id=?", (nid,)).fetchone()
+    if not req or req["status"] != "pending":
+        return await cb.answer("Заявка уже обработана", show_alert=True)
+    await state.set_state(NftCredit.amount)
+    await state.update_data(nid=nid)
+    await cb.message.answer(
+        f"Заявка #{nid}, подарок «{req['gift_name']}».\n"
+        "Введи сумму голды, которую начислишь пользователю ПОСЛЕ получения подарка:")
+    await cb.answer()
+
+
+@router.message(NftCredit.amount)
+async def nft_price_set(m: Message, state: FSMContext, bot: Bot):
+    if not is_admin(m.from_user.id):
+        return
+    if not (m.text and m.text.isdigit()) or int(m.text) <= 0:
+        return await m.answer("Введи положительное целое число.")
+    amount = int(m.text)
+    data = await state.get_data()
+    await state.clear()
+    nid = data["nid"]
+    with db() as c:
+        req = c.execute("SELECT * FROM nft_topups WHERE id=?", (nid,)).fetchone()
+        if not req or req["status"] != "pending":
+            return await m.answer("Заявка уже обработана.")
+        c.execute("UPDATE nft_topups SET status='quoted', amount=? WHERE id=?", (amount, nid))
+    await m.answer(f"✅ Цена {amount} голды назначена по заявке #{nid}. "
+                   "Пользователю отправлено уведомление.")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="📤 Я отправил подарок", callback_data=f"nft_sent:{nid}")]])
+    try:
+        await bot.send_message(
+            req["user_id"],
+            f"💰 За подарок «{req['gift_name']}» администратор начислит тебе "
+            f"<b>{amount} голды</b>.\n\n"
+            f"Теперь отправь сам подарок на профиль @{ADMIN_GIFT_USERNAME} в Telegram "
+            "(функция «Подарить подарок»), затем нажми кнопку ниже и пришли "
+            "скриншот подтверждения отправки.",
+            parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        pass
+
+
+@router.callback_query(F.data.startswith("nft_sent:"))
+async def nft_sent(cb: CallbackQuery, state: FSMContext):
+    nid = int(cb.data.split(":")[1])
+    with db() as c:
+        req = c.execute("SELECT * FROM nft_topups WHERE id=?", (nid,)).fetchone()
+    if not req or req["status"] != "quoted":
+        return await cb.answer("Эта заявка сейчас недоступна", show_alert=True)
+    if req["user_id"] != cb.from_user.id:
+        return await cb.answer("Это не твоя заявка", show_alert=True)
+    await state.set_state(NftTopup.proof)
+    await state.update_data(nid=nid)
+    await cb.message.answer("Пришли скриншот подтверждения, что подарок отправлен "
+                            f"на @{ADMIN_GIFT_USERNAME}:")
+    await cb.answer()
+
+
+@router.message(NftTopup.proof, F.photo)
+async def nft_proof(m: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    nid = data.get("nid")
+    await state.clear()
+    with db() as c:
+        req = c.execute("SELECT * FROM nft_topups WHERE id=?", (nid,)).fetchone()
+        if not req or req["status"] != "quoted" or req["user_id"] != m.from_user.id:
+            return await m.answer("Эта заявка сейчас недоступна.")
+        c.execute("UPDATE nft_topups SET status='proof_submitted', proof_file_id=? WHERE id=?",
+                  (m.photo[-1].file_id, nid))
+    await m.answer("✅ Скриншот отправлен администратору на проверку. "
+                   f"После подтверждения тебе начислят {req['amount']} голды.",
+                   reply_markup=main_menu())
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Подтвердить и начислить", callback_data=f"nft_confirm:{nid}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"nft_rej:{nid}"),
+    ]])
+    caption = (f"🎁 Заявка #{nid}: подарок отправлен, ждёт подтверждения\n"
+               f"Пользователь: {req['user_id']} (@{m.from_user.username})\n"
+               f"Подарок: {req['gift_name']}\n"
+               f"Согласованная сумма: {req['amount']} голды\n\n"
+               f"Проверь на @{ADMIN_GIFT_USERNAME}, что подарок реально пришёл, прежде чем подтверждать.")
+    for admin in ADMIN_IDS:
+        if admin == 0:
+            continue
+        try:
+            await bot.send_photo(admin, m.photo[-1].file_id, caption=caption, reply_markup=kb)
+        except Exception:
+            logging.exception("Не удалось отправить подтверждение админу %s", admin)
+
+
+@router.message(NftTopup.proof)
+async def nft_proof_bad(m: Message):
+    await m.answer("Нужен именно скриншот (фото) подтверждения отправки подарка.")
+
+
+@router.callback_query(F.data.startswith("nft_confirm:"))
+async def nft_confirm(cb: CallbackQuery, bot: Bot):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    nid = int(cb.data.split(":")[1])
+    with db() as c:
+        req = c.execute("SELECT * FROM nft_topups WHERE id=?", (nid,)).fetchone()
+        if not req or req["status"] != "proof_submitted":
+            return await cb.answer("Заявка уже обработана", show_alert=True)
+        c.execute("UPDATE nft_topups SET status='credited' WHERE id=?", (nid,))
+    add_balance(req["user_id"], req["amount"])
+    try:
+        await bot.send_message(req["user_id"],
+                               f"✅ Подарок принят! Начислено {req['amount']} голды.")
+    except Exception:
+        pass
+    await cb.message.edit_caption(
+        caption=(cb.message.caption or "") + f"\n\n✅ Начислено {req['amount']} голды")
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("nft_rej:"))
+async def nft_reject(cb: CallbackQuery, bot: Bot):
+    if not is_admin(cb.from_user.id):
+        return await cb.answer("Нет доступа", show_alert=True)
+    nid = int(cb.data.split(":")[1])
+    with db() as c:
+        req = c.execute("SELECT * FROM nft_topups WHERE id=?", (nid,)).fetchone()
+        if not req or req["status"] in ("credited", "rejected"):
+            return await cb.answer("Заявка уже обработана", show_alert=True)
+        c.execute("UPDATE nft_topups SET status='rejected' WHERE id=?", (nid,))
+    try:
+        await bot.send_message(req["user_id"],
+                               f"❌ Заявка на подарок «{req['gift_name']}» отклонена.")
+    except Exception:
+        pass
+    if cb.message.caption is not None:
+        await cb.message.edit_caption(caption=(cb.message.caption or "") + "\n\n❌ Отклонено")
+    else:
+        await cb.message.edit_text(text=(cb.message.text or "") + "\n\n❌ Отклонено")
     await cb.answer()
 
 
@@ -730,13 +993,51 @@ async def adm_del(cb: CallbackQuery):
 
 # ---------------------- ЗАПУСК ----------------------
 async def main():
+    # --- проверка настроек, чтобы сразу было понятно, что не так ---
+    if not re.fullmatch(r"\d+:[\w-]+", BOT_TOKEN.strip()):
+        print("\n❌ Не указан токен бота.\n"
+              "   Открой bot.py и в самом верху впиши токен от @BotFather в BOT_TOKEN.\n")
+        return
+    if not ADMIN_IDS or 0 in ADMIN_IDS:
+        print("\n⚠️  Не указан ID админа — админ-панель работать не будет.\n"
+              "   Впиши свой ID (узнать у @userinfobot) в ADMIN_IDS в начале bot.py.\n")
+
     init_db()
-    bot = Bot(BOT_TOKEN)
+    bot = Bot(BOT_TOKEN.strip())
+    try:
+        me = await bot.get_me()
+    except TelegramUnauthorizedError:
+        print("\n❌ Токен неверный. Скопируй его заново у @BotFather.\n")
+        await bot.session.close()
+        return
+    except Exception as e:
+        print(f"\n❌ Не удалось подключиться к Telegram: {e}\n"
+              "   Проверь интернет/VPN и попробуй снова.\n")
+        await bot.session.close()
+        return
+
+    print(f"✅ Бот запущен: @{me.username}. Остановить — Ctrl+C.")
+    await bot.delete_webhook(drop_pending_updates=True)
+    for admin in ADMIN_IDS:
+        if admin == 0:
+            continue
+        try:
+            await bot.send_message(admin, "✅ Бот запущен. Админ-панель: /admin")
+        except Exception:
+            print(f"⚠️  Не могу написать админу {admin}: открой бота и нажми /start, "
+                  "и проверь, что ID верный.")
+
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
     asyncio.create_task(ton_watcher(bot))
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Бот остановлен.")
